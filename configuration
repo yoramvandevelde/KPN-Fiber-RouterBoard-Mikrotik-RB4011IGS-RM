@@ -67,7 +67,7 @@ add address-pool=LAN interface=bridge-lan lease-time=1h30m name=dhcp-home
 set *0 only-one=yes use-compression=yes use-ipv6=no use-upnp=no
 add name=default-ipv6 only-one=yes use-compression=yes use-upnp=no
 
-# With the configured default profilt we setup the a PAP PPP connection
+# With the configured default profile we setup the a PAP PPP connection
 /interface pppoe-client
 add add-default-route=yes allow=pap disabled=no interface=vlan1.6 keepalive-timeout=20 max-mru=\
     1500 max-mtu=1500 name=pppoe-client profile=default-ipv6 user=<GET THIS VALUE FROM YOUR KPN ROUTER>@internet
