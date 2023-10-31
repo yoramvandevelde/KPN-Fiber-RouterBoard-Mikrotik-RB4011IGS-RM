@@ -1,0 +1,261 @@
+# Configuration for KPN Fiber with a 
+# RouterBoard Mikrotik RB4011IGS+RM. 
+#
+# Simpel configuration get IPv4 and IPv6 working with
+# DHCP and ND.
+#
+# Used directly on a RB2011UiAS I got a max troughput of about
+# 120 mb/s the CPU being at 100%. This is with a very small set
+# of firewall rules. So I upgraded my RouterBoard to a more
+# powerfull version. With the RB4011IGS+RM I got a throughput of
+# 850 mb/s. About the same as I got with the default ISP route
+# # provided. With the MikroTik I was able to half the ping times
+# most of the time. This might be a QOS thing, not sure.
+
+# This configuration was bootstrapped from netwerkje.com
+# (https://netwerkje.com/config-internetv6). It's in Dutch, but
+# with any translation service you should be able to use it.
+# I have commented on my specific configuration as much as I
+# could with my limited networking knowledge. It works for me(tm).
+
+# Stuff withing <BRACKETS> should be replaced with something that
+# applies to your situation/configuration.
+
+# So, let's get configurationataling!
+
+# We create a bridge for all the available netwerkports that
+# will belong to the LAN.
+/interface bridge
+add arp=proxy-arp name=bridge-lan
+
+# We disable the SFP port and turn off loop-protection on ether1
+# Loop protect seems like a STP light variant. This might be
+# interesting for the internal network, but as we use ether1 for
+# the pppoe connection to the ISP we are pretty sure where will not
+# be any looping there.
+/interface ethernet
+set [ find default-name=sfp1 ] disabled=yes
+set [ find default-name=ether1 ] arp=proxy-arp loop-protect=off
+
+# The incoming KPN ethernet has 3 VLAN's configured on it. Each
+# of these holds a service:
+#   - VLAN 4 = IPTV
+#   - VLAN 6 = IP
+#   - VLAN 7 = VOIP
+#
+# As I don't use anything other than the internet service I will
+# only pick up a single VLAN from the incoming ethernet on _ether1_.
+# Again we disable the loop-protection.
+/interface vlan
+add interface=ether1 loop-protect=off name=vlan1.6 vlan-id=6
+
+# We configure a IP pool for the DHCP server to use.
+/ip pool
+add name=LAN ranges=10.10.10.1-10.10.10.220
+
+# Then we configure the DHCP server of the router to provide
+# IP addresses from the configured LAN pool.
+/ip dhcp-server
+add address-pool=LAN interface=bridge-lan lease-time=1h30m name=dhcp-home
+
+# To connect to the service provider we need to setup a ppp connection
+# with a default profile. This is the default profile. As far as I
+# understand we use compression because RouterOS has 20 ghost bytes in the
+# headers for pppoe. As some ISPs don't support a MTU of 1520 this should
+# be compressed. Might experiment with a MTU of 1520 on the pppoe-client.
+/ppp profile
+set *0 only-one=yes use-compression=yes use-ipv6=no use-upnp=no
+add name=default-ipv6 only-one=yes use-compression=yes use-upnp=no
+
+# With the configured default profilt we setup the a PAP PPP connection
+/interface pppoe-client
+add add-default-route=yes allow=pap disabled=no interface=vlan1.6 keepalive-timeout=20 max-mru=\
+    1500 max-mtu=1500 name=pppoe-client profile=default-ipv6 user=<GET THIS VALUE FROM YOUR KPN ROUTER>@internet
+
+# Interface ether1 is used by the incoming connection
+# the rest of the interfaces we bind into a bridge dedicated
+# to the LAN.
+/interface bridge port
+add bridge=bridge-lan interface=ether2
+add bridge=bridge-lan interface=ether3
+add bridge=bridge-lan interface=ether4
+add bridge=bridge-lan interface=ether5
+add bridge=bridge-lan interface=ether6
+add bridge=bridge-lan interface=ether7
+add bridge=bridge-lan interface=ether8
+add bridge=bridge-lan interface=ether9
+add bridge=bridge-lan interface=ether10
+
+
+# DHCP works only on the LAN clients, so we will have
+# to configure an IP address in the local range. This
+# will be the default gateway for IPv4 for the local
+# clients.
+/ip address
+add address=10.10.10.254/24 interface=bridge-lan network=10.10.10.0
+add address=10.10.20.254/24 interface=bridge-lan network=10.10.20.0
+
+# We save the DHCP server configuration to disk every 15m.
+/ip dhcp-server config
+set store-leases-disk=15m
+
+# If you want any client to have a DHCP lease which will
+# be statuc. Great for internal services. In this example
+# this is my pihole (https://pi-hole.net/).
+/ip dhcp-server lease
+add address=10.10.10.53 client-id="pihole" mac-address=<GET MAC ADDRESS FROM THE CLIENT> server=dhcp-home
+
+# Configure some defaults for the network to be served
+# through DHCP inqueries.
+/ip dhcp-server network
+add address=10.10.10.0/24 dns-server=10.10.10.53 domain=<SOMETHING.local> gateway=10.10.10.254 \
+    ntp-server=10.10.10.254
+add address=10.10.20.0/24 dns-server=10.10.10.53 domain=<SOMETHING.local> gateway=10.10.20.254 \
+    netmask=24
+
+# DNS setting for the router itself. Pihole, Cloudflare and
+# Google respectively.
+/ip dns
+set allow-remote-requests=yes cache-max-ttl=1d servers=10.10.10.53,1.1.1.1,8.8.8.8
+
+# Let's get some IPv6 from the pppoe-client connection
+/ipv6 dhcp-client
+add add-default-route=yes interface=pppoe-client pool-name=0 pool-prefix-length=48 request=prefix \
+    use-peer-dns=no
+
+# Choose the first IP address of the delagtion to use on
+# the router
+/ipv6 address
+add address=::1 from-pool=0 interface=bridge-lan
+
+# Firewalls, I love thou.
+# 1. Ignore ping packets, most scriptkiddies don't know
+# the -Pn flags on nmap
+# 2 & 3. Anything we previously accepted has a fastlane
+# 4 & 5. Drop everything else
+/ip firewall filter
+add action=drop chain=input in-interface=pppoe-client protocol=icmp
+add action=accept chain=input connection-state=related
+add action=accept chain=input connection-state=established
+add action=drop chain=input in-interface=pppoe-client protocol=tcp
+add action=drop chain=input in-interface=pppoe-client protocol=udp
+
+# Nat rules to make it work
+# 1. Allow client to connect to the outside world
+# 2,3,4, allow ssh, http and https in to the pihole.
+/ip firewall nat
+add action=masquerade chain=srcnat comment="Needed for internet routing from LAN" out-interface=pppoe-client \
+    src-address=10.10.0.0/16
+add action=dst-nat chain=dstnat dst-port=22 in-interface=pppoe-client protocol=tcp to-addresses=\
+    10.10.10.53 to-ports=22
+add action=dst-nat chain=dstnat dst-port=80 in-interface=pppoe-client protocol=tcp to-addresses=\
+    10.10.10.53 to-ports=80
+add action=dst-nat chain=dstnat dst-port=443 in-interface=pppoe-client protocol=tcp to-addresses=\
+    10.10.10.53 to-ports=443
+
+# Did I tell you I love firewalls?
+# 1 & 2. Fastlane stuffz
+# 3. I seem to have some trouble getting an IPv6 delegation
+# with this turned off. Might investigate later.
+# 4. Accepting DHCPv6 for local network
+# 5. Fastlane for rel/est
+# 6. Drop the rest
+/ipv6 firewall filter
+add action=accept chain=input connection-state=established in-interface=pppoe-client
+add action=accept chain=input connection-state=related in-interface=pppoe-client
+add action=accept chain=input in-interface=pppoe-client protocol=icmpv6
+add action=accept chain=input comment="DHCPv6 for public addresses" dst-address=fe80::/64 \
+    dst-port=546 in-interface=pppoe-client log-prefix=DHCPv6 protocol=udp
+add action=drop chain=input in-interface=pppoe-client
+add action=accept chain=forward connection-state=related in-interface=pppoe-client
+add action=accept chain=forward connection-state=established in-interface=pppoe-client
+add action=drop chain=forward in-interface=pppoe-client
+
+/ipv6 nd
+set [ find default=yes ] disabled=yes
+add advertise-mac-address=no hop-limit=64 interface=bridge-lan
+
+## Time and NTP features
+# Set the timezone for the device. Available timezones can be found on
+# https://nodatime.org/TimeZones
+/system clock
+set time-zone-name=Europe/Amsterdam
+
+# Enable the client to sync time to the above specified server
+/system ntp client
+set enabled=yes
+
+# Set the NTP server to one provided by your ISP or use one from
+# https://www.ntppool.org/en/use.html
+/system ntp client servers
+add address=time.kpn.net
+
+# Enable the NTP server for use on the local network
+/system ntp server
+set broadcast=yes broadcast-addresses=10.10.10.255 enabled=yes manycast=yes multicast=yes \
+    use-local-clock=yes
+
+## Security features
+# Add custom user with full rights and disable admin account
+/user add name=<DON'T USE ADMIN> password=<CREATE YOUR OWN> group=full
+/user disable admin
+
+# Mitigates some SYN flood attacks.
+/ip settings
+set tcp-syncookies=yes
+
+# Disable UPnP
+/ip upnp
+set show-dummy-rule=no
+
+/ip upnp interfaces
+add interface=bridge-lan type=internal
+add interface=pppoe-client type=external
+
+# Disable MAC management services
+/tool mac-server set allowed-interface-list=none
+/tool mac-server mac-winbox set allowed-interface-list=none
+/tool mac-server ping set enabled=no
+
+# Disable neighboring router discovery
+/ip neighbor discovery-settings set discover-interface-list=none
+
+# Disable bandwith test for speedtests between multiple routers
+/tool bandwidth-server set enabled=no
+
+# Disable DNS caching
+/ip dns set allow-remote-requests=no
+
+# Create CA and self-signed certificate for HTTPS acces
+/certificate add name=self-signed-certificate common-name=common-name \
+    country=nl \
+    days-valid=365 \
+    key-size=2048 \
+    locality=locality \
+    organization=organization \
+    state=state \
+    trusted=yes \
+    unit=organization-unit \
+    subject-alt-name=DNS:<ROUTERNAME.SOMETHING.local>,IP:10.10.10.254,email:you@example.com \
+    key-usage=digital-signature,key-cert-sign,crl-sign;
+/certificate sign name=common-name self-signed-certificate
+
+# Enable HTTPS service
+set www-ssl certificate=common-name disabled=no tls-version=only-1.2
+
+# Harden the SSH configuration
+/ip ssh set strong-crypto=yes
+
+# Last but not least; disable unused services
+/ip proxy set enabled=no
+/ip socks set enabled=no
+/ip upnp set enabled=no
+/ip cloud set ddns-enabled=no update-time=no
+
+/ip service
+set winbox disabled=yes
+set telnet disabled=yes
+set ftp disabled=yes
+set www disabled=yes
+set api disabled=yes
+set api-ssl certificate=common-name disabled=yes tls-version=only-1.2
