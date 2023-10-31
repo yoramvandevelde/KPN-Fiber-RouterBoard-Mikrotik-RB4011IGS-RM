@@ -123,7 +123,7 @@ set allow-remote-requests=yes cache-max-ttl=1d servers=10.10.10.53,1.1.1.1,8.8.8
 add add-default-route=yes interface=pppoe-client pool-name=0 pool-prefix-length=48 request=prefix \
     use-peer-dns=no
 
-# Choose the first IP address of the delagtion to use on
+# Choose the first IP address of the delegation to use on
 # the router
 /ipv6 address
 add address=::1 from-pool=0 interface=bridge-lan
