@@ -223,7 +223,7 @@ add interface=pppoe-client type=external
 # Disable bandwith test for speedtests between multiple routers
 /tool bandwidth-server set enabled=no
 
-# Disable DNS caching
+# Disable public DNS requests
 /ip dns set allow-remote-requests=no
 
 # Create CA and self-signed certificate for HTTPS acces
